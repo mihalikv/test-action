@@ -1,0 +1,64 @@
+name: Deploy Trellis
+
+on:
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: Environment
+                required: true
+                default: staging
+                type: choice
+                options:
+                    - staging
+                    - production
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        container:
+            image: python:3.12
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v4
+
+            - name: Cache Dependencies
+              uses: actions/cache@v4
+              with:
+                  path: |
+                      apt-cache
+                      .yarn
+                  key: ${{ github.repository_id }}
+
+            - name: Install System Dependencies
+              run: |
+                  apt-get update -qq
+                  apt-get install -y sudo rsync wget
+
+            - name: Install Ansible and Trellis CLI
+              run: |
+                  pip3 install --upgrade "ansible>=2.16"
+                  wget __https://roots.io/trellis/cli/get__ -O script.sh
+                  chmod +x script.sh
+                  ./script.sh v1.12.1
+                  # Note: Trellis CLI usually installs to /usr/local/bin or current dir
+                  # Ensure it's in path or call it directly
+
+            - name: Setup Node and Yarn
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: yarn
+
+            - name: Set up SSH Agent
+              uses: __webfactory/ssh-agent@v0.9.0__
+              with:
+                  ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+            - name: Run Ansible Playbook
+              env:
+                  ANSIBLE_VAULT_PASSWORD: ${{ secrets.ANSIBLE_VAULT_PASSWORD }}
+              run: |
+                  cd trellis
+                  echo "$ANSIBLE_VAULT_PASSWORD" > .vault_password.txt
+                  chmod o-w .
+                  ansible-playbook deploy.yml -e env=${{ github.event.inputs.environment }} -e site=resco.sk --vault-password-file .vault_password.txt
